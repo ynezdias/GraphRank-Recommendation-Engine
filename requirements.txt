@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pyspark
+networkx
+psycopg2-binary
+redis
+pandas
+numpy
+python-dotenv
