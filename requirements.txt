@@ -1,9 +1,11 @@
-fastapi
-uvicorn
-pyspark
-networkx
-psycopg2-binary
-redis
-pandas
-numpy
-python-dotenv
+fastapi==0.110.0
+uvicorn==0.29.0
+pandas==2.2.2
+numpy==1.26.4
+networkx==3.2.1
+psycopg2-binary==2.9.9
+redis==5.0.4
+python-dotenv==1.0.1
+
+# IMPORTANT
+pyspark==3.5.1
