@@ -9,3 +9,5 @@ python-dotenv==1.0.1
 
 # IMPORTANT
 pyspark==3.5.1
+faker==24.3.0
+tqdm==4.66.2
