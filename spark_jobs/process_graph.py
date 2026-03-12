@@ -4,10 +4,11 @@ spark = SparkSession.builder \
     .appName("GraphRank Processing") \
     .getOrCreate()
 
-connections = spark.read.csv("connections.csv", header=True, inferSchema=True)
+connections = spark.read.csv("data/connections.csv", header=True, inferSchema=True)
 
+# Count degree of each node
 degree = connections.groupBy("user_a").count()
 
 degree.show()
 
-degree.write.csv("user_degree")
+degree.write.csv("processed/user_degree", mode="overwrite")
