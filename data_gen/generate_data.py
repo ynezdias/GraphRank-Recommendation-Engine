@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 def generate_data(num_users, num_connections, num_posts, output_dir="data"):
     os.makedirs(output_dir, exist_ok=True)
     fake = Faker()
-
+# this is edited
     print(f"Generating {num_users} users...")
     users = []
     for i in range(num_users):
