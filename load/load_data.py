@@ -13,15 +13,11 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 def create_tables(conn):
-    print("Initializing PostgreSQL schema...")
+    print("Initializing PostgreSQL schema (if not exists)...")
     with conn.cursor() as cur:
-        # Drop existing tables if they exist for clean load
-        cur.execute("DROP TABLE IF EXISTS recommendations;")
-        cur.execute("DROP TABLE IF EXISTS users;")
-        
         # Create users table holding PageRank influence scores
         cur.execute("""
-            CREATE TABLE users (
+            CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 name VARCHAR(255),
                 username VARCHAR(255),
@@ -31,7 +27,7 @@ def create_tables(conn):
         
         # Create recommendations table mapping user to recommended users
         cur.execute("""
-            CREATE TABLE recommendations (
+            CREATE TABLE IF NOT EXISTS recommendations (
                 user_id INTEGER,
                 recommended_user_id INTEGER,
                 score FLOAT,
@@ -62,10 +58,18 @@ def load_data_to_postgres(conn):
             # Prepare data for insertion
             user_records = merged_users[['user_id', 'name', 'username', 'pagerank']].to_records(index=False)
             
-            print("  Inserting user data...")
+            print("  Upserting user data...")
             execute_values(
                 cur,
-                "INSERT INTO users (user_id, name, username, pagerank_score) VALUES %s ON CONFLICT (user_id) DO NOTHING",
+                """
+                INSERT INTO users (user_id, name, username, pagerank_score) 
+                VALUES %s 
+                ON CONFLICT (user_id) 
+                DO UPDATE SET 
+                    name = EXCLUDED.name,
+                    username = EXCLUDED.username,
+                    pagerank_score = EXCLUDED.pagerank_score
+                """,
                 user_records
             )
         except Exception as e:
@@ -83,10 +87,15 @@ def load_data_to_postgres(conn):
             
             rec_records = filtered_recs[['user_id', 'recommended_user_id', 'recommendation_score']].to_records(index=False)
             
-            print("  Inserting recommendation data...")
+            print("  Upserting recommendation data...")
             execute_values(
                 cur,
-                "INSERT INTO recommendations (user_id, recommended_user_id, score) VALUES %s ON CONFLICT DO NOTHING",
+                """
+                INSERT INTO recommendations (user_id, recommended_user_id, score) 
+                VALUES %s 
+                ON CONFLICT (user_id, recommended_user_id) 
+                DO UPDATE SET score = EXCLUDED.score
+                """,
                 rec_records
             )
         except Exception as e:
