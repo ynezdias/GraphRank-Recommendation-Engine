@@ -10,10 +10,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuration
-POSTGRES_DSN = "dbname=graphrank user=admin password=admin host=localhost port=5432"
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
+import os
+
+# Configuration (Supports Environment Variables for Docker)
+DB_HOST = os.getenv("DB_HOST", "localhost")
+POSTGRES_DSN = f"dbname=graphrank user=admin password=admin host={DB_HOST} port=5432"
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 # Dependency to get DB connection per request
 def get_db():

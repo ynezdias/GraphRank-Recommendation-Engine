@@ -6,10 +6,11 @@ import json
 import os
 from tqdm import tqdm
 
-# Configuration
-POSTGRES_DSN = "dbname=graphrank user=admin password=admin host=localhost port=5432"
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
+# Configuration (Supports Environment Variables for Docker)
+DB_HOST = os.getenv("DB_HOST", "localhost")
+POSTGRES_DSN = f"dbname=graphrank user=admin password=admin host={DB_HOST} port=5432"
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 def create_tables(conn):
     print("Initializing PostgreSQL schema...")
