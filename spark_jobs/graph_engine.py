@@ -1,23 +1,30 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("graph_engine")
 
 def calculate_pagerank(spark, connections, max_iter=10, damping_factor=0.85):
     """
     Computes PageRank natively using PySpark DataFrames.
     """
-    print("Initializing PageRank calculation...")
+    logger.info("Initializing PageRank calculation...")
     
     # 1. Identify all unique nodes
     nodes = connections.select(F.col("user_a").alias("id")) \
         .union(connections.select(F.col("user_b").alias("id"))) \
         .distinct()
     
+    nodes.cache() # Cache for reuse in iterative loop
+    
     num_nodes = nodes.count()
     if num_nodes == 0:
         return spark.createDataFrame([], schema="id: string, pagerank: double")
     
-    print(f"Total graph nodes: {num_nodes}")
+    logger.info(f"Total graph nodes: {num_nodes}")
 
     # 2. Compute out-degree for each node
     out_degrees = connections.groupBy("user_a") \
@@ -36,10 +43,11 @@ def calculate_pagerank(spark, connections, max_iter=10, damping_factor=0.85):
             F.col("user_b").alias("dst"), 
             (F.lit(1.0) / F.col("degree")).alias("weight")
         )
+    links.cache() # Cache links as they are heavily reused
 
     # 5. Iteratively calculate PageRank
     for i in range(max_iter):
-        print(f"  PageRank Iteration {i+1}/{max_iter}...")
+        logger.info(f"  PageRank Iteration {i+1}/{max_iter}...")
         
         # Calculate contributions from sources to destinations
         contributions = links.join(ranks, links.src == ranks.id) \
@@ -53,17 +61,22 @@ def calculate_pagerank(spark, connections, max_iter=10, damping_factor=0.85):
             .fillna({"sum_contrib": 0.0}) \
             .withColumn("rank", F.lit(base_rank) + (F.lit(damping_factor) * F.col("sum_contrib"))) \
             .select("id", "rank")
+            
+        # Truncate lineage to prevent OutOfMemory/StackOverflow on many iterations
+        ranks.cache()
+        # Force materialization
+        ranks.count()
 
     # Rename output columns for consistency
     return ranks.withColumnRenamed("id", "user_id").withColumnRenamed("rank", "pagerank")
 
 
-def generate_recommendations(spark, connections, pagerank_scores, limit=10):
+def generate_recommendations(spark, connections, pagerank_scores, user_metrics, limit=10):
     """
     Recommends users based on mutual connections (triadic closure)
     and weights them by PageRank influence.
     """
-    print("Generating recommendations based on mutual connections...")
+    logger.info("Generating recommendations based on mutual connections...")
     
     # connections is currently user_a -> user_b
     # Let's ensure we consider links mostly bidirectional or at least find mutuals
@@ -98,9 +111,14 @@ def generate_recommendations(spark, connections, pagerank_scores, limit=10):
     # Step 4: Add PageRank influence to rank the recommendations
     # We want to recommend influential people (dst's PageRank) if mutuals are tied
     ranked_recs = mutual_counts.join(pagerank_scores, mutual_counts.dst == pagerank_scores.user_id) \
+        .join(user_metrics, mutual_counts.dst == user_metrics.user_id, "left") \
+        .fillna({"post_count": 0, "total_connections": 0}) \
         .withColumn(
             "recommendation_score", 
-            (F.col("mutual_friends") * 0.7) + (F.col("pagerank") * 100 * 0.3)
+            (F.col("mutual_friends") * 0.5) + 
+            (F.col("pagerank") * 100 * 0.3) + 
+            (F.col("total_connections") * 0.1) + 
+            (F.col("post_count") * 0.1)
         )
         
     # Step 5: Format output
@@ -124,28 +142,29 @@ def main():
     # Set log level to minimize verbosity in logs
     spark.sparkContext.setLogLevel("ERROR")
 
-    print("Loading graph data...")
+    logger.info("Loading graph data...")
     df_connections = spark.read.csv("data/connections.csv", header=True, inferSchema=True)
+    df_user_metrics = spark.read.parquet("processed/user_metrics")
     
     # 1. Compute PageRank
     pagerank_scores = calculate_pagerank(spark, df_connections, max_iter=5) # Reduced iter for test data speed
     
-    print("Writing PageRank results...")
+    logger.info("Writing PageRank results...")
     pr_output_path = "processed/pagerank_scores"
     pagerank_scores.write.parquet(pr_output_path, mode="overwrite")
     pagerank_scores.orderBy(F.col("pagerank").desc()).limit(100).write.csv(f"{pr_output_path}_sample", header=True, mode="overwrite")
     
     # 2. Compute Recommendations
-    recommendations = generate_recommendations(spark, df_connections, pagerank_scores)
+    recommendations = generate_recommendations(spark, df_connections, pagerank_scores, df_user_metrics)
     
-    print("Writing Recommendation results...")
+    logger.info("Writing Recommendation results...")
     rec_output_path = "processed/recommendations"
     recommendations.write.parquet(rec_output_path, mode="overwrite")
     
     # Save top recommendations overall to CSV sample
     recommendations.orderBy(F.col("recommendation_score").desc()).limit(100).write.csv(f"{rec_output_path}_sample", header=True, mode="overwrite")
 
-    print("Graph Engine job completed successfully.")
+    logger.info("Graph Engine job completed successfully.")
     spark.stop()
 
 if __name__ == "__main__":
