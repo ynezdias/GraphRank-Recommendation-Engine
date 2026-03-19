@@ -4,7 +4,12 @@ from psycopg2.extras import execute_values
 import redis
 import json
 import os
+import logging
 from tqdm import tqdm
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("data_loader")
 
 # Configuration (Supports Environment Variables for Docker)
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -13,7 +18,7 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 def create_tables(conn):
-    print("Initializing PostgreSQL schema (if not exists)...")
+    logger.info("Initializing PostgreSQL schema (if not exists)...")
     with conn.cursor() as cur:
         # Create users table holding PageRank influence scores
         cur.execute("""
@@ -38,13 +43,13 @@ def create_tables(conn):
     conn.commit()
 
 def load_data_to_postgres(conn):
-    print("Loading data into PostgreSQL...")
+    logger.info("Loading data into PostgreSQL...")
     
     with conn.cursor() as cur:
         # 1. Load Users & PageRank Scores
         # For simplicity, we assume we want to load users that have a PageRank score.
         # In a real system, we'd upsert or load all users then update scores.
-        print("  Reading pagerank sample data...")
+        logger.info("  Reading pagerank sample data...")
         try:
             # We use the CSV sample for simplicity in this loader, 
             # in production we would read the Parquet files using pyarrow or similar.
@@ -58,7 +63,7 @@ def load_data_to_postgres(conn):
             # Prepare data for insertion
             user_records = merged_users[['user_id', 'name', 'username', 'pagerank']].to_records(index=False)
             
-            print("  Upserting user data...")
+            logger.info("  Upserting user data...")
             execute_values(
                 cur,
                 """
@@ -73,11 +78,11 @@ def load_data_to_postgres(conn):
                 user_records
             )
         except Exception as e:
-             print(f"  Warning: Could not load user PageRank data: {e}")
+             logger.warning(f"Could not load user PageRank data: {e}")
 
 
         # 2. Load Recommendations
-        print("  Reading recommendations sample data...")
+        logger.info("  Reading recommendations sample data...")
         try:
             rec_df = pd.read_csv("processed/recommendations_sample")
             # Ensure we only insert recommendations where the base user exists in our sample 'users' table
@@ -87,7 +92,7 @@ def load_data_to_postgres(conn):
             
             rec_records = filtered_recs[['user_id', 'recommended_user_id', 'recommendation_score']].to_records(index=False)
             
-            print("  Upserting recommendation data...")
+            logger.info("  Upserting recommendation data...")
             execute_values(
                 cur,
                 """
@@ -99,13 +104,13 @@ def load_data_to_postgres(conn):
                 rec_records
             )
         except Exception as e:
-            print(f"  Warning: Could not load recommendations data: {e}")
+            logger.warning(f"Could not load recommendations data: {e}")
 
     conn.commit()
-    print("PostgreSQL loading complete.")
+    logger.info("PostgreSQL loading complete.")
 
 def prime_redis_cache(conn, redis_cli):
-    print("Priming Redis cache with top recommendations...")
+    logger.info("Priming Redis cache with top recommendations...")
     
     with conn.cursor() as cur:
         # Get users who have recommendations
@@ -130,26 +135,26 @@ def prime_redis_cache(conn, redis_cli):
             cache_key = f"recs:{user_id}"
             redis_cli.setex(cache_key, 3600, json.dumps(rec_list))
             
-    print("Redis priming complete.")
+    logger.info("Redis priming complete.")
 
 def main():
-    print("Starting data loading process...")
+    logger.info("Starting data loading process...")
     
     # 1. Connect to PostgreSQL
     try:
         pg_conn = psycopg2.connect(POSTGRES_DSN)
-        print("Connected to PostgreSQL.")
+        logger.info("Connected to PostgreSQL.")
     except Exception as e:
-        print(f"Failed to connect to PostgreSQL. Ensure it is running: {e}")
+        logger.error(f"Failed to connect to PostgreSQL. Ensure it is running: {e}")
         return
 
     # 2. Connect to Redis
     try:
         redis_cli = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
         redis_cli.ping()
-        print("Connected to Redis.")
+        logger.info("Connected to Redis.")
     except Exception as e:
-        print(f"Failed to connect to Redis. Ensure it is running: {e}")
+        logger.error(f"Failed to connect to Redis. Ensure it is running: {e}")
         return
 
     # Execute loading steps
@@ -159,7 +164,7 @@ def main():
     
     # Cleanup
     pg_conn.close()
-    print("Process finished successfully.")
+    logger.info("Process finished successfully.")
 
 if __name__ == "__main__":
     main()
