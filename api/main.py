@@ -6,6 +6,7 @@ import redis
 import json
 import logging
 import time
+from pydantic import BaseModel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -70,6 +71,73 @@ def get_redis():
     except Exception as e:
         logger.error(f"Redis connection error: {e}")
         raise HTTPException(status_code=500, detail="Redis connection failed")
+
+class Interaction(BaseModel):
+    user_a: int
+    user_b: int
+
+@app.post("/interactions")
+def add_interaction(interaction: Interaction, db = Depends(get_db), cache = Depends(get_redis)):
+    """
+    Real-time interaction ingestion endpoint simulating near real-time updates.
+    """
+    # 1. Append to CSV for batch processing
+    try:
+        # We append directly to the connections.csv
+        with open("data/connections.csv", "a") as f:
+            f.write(f"\n{interaction.user_a},{interaction.user_b}")
+    except Exception as e:
+        logger.error(f"Failed to append to connections.csv: {e}")
+        # We continue despite CSV failure, to ensure the real-time DB is updated
+        
+    try:
+        with db.cursor(cursor_factory=RealDictCursor) as cur:
+            # 2. Increment PageRank for user_b
+            # Since they received a new inbound link, we instantly bump their influence slightly.
+            cur.execute("""
+                UPDATE users 
+                SET pagerank_score = pagerank_score + 0.02 
+                WHERE user_id = %s
+            """, (interaction.user_b,))
+            
+            # 3. Triadic Closure: Fetch user_b's current recommendations
+            cur.execute("""
+                SELECT recommended_user_id, score
+                FROM recommendations
+                WHERE user_id = %s
+                ORDER BY score DESC
+                LIMIT 5
+            """, (interaction.user_b,))
+            b_recs = cur.fetchall()
+            
+            if b_recs:
+                # Recommend them to user_a as well
+                insert_query = """
+                    INSERT INTO recommendations (user_id, recommended_user_id, score) 
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, recommended_user_id) 
+                    DO UPDATE SET score = recommendations.score + EXCLUDED.score
+                """
+                for rec in b_recs:
+                    # Discount the score to reflect length-2 path
+                    new_score = rec['score'] * 0.5
+                    # Don't recommend self
+                    if rec['recommended_user_id'] != interaction.user_a:
+                        cur.execute(insert_query, (interaction.user_a, rec['recommended_user_id'], new_score))
+                
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database update failed: {str(e)}")
+        
+    # 4. Invalidate Redis Caches
+    try:
+        cache.delete(f"recs:{interaction.user_a}")
+        cache.delete(f"recs:{interaction.user_b}")
+    except Exception as e:
+        logger.warning(f"Failed to clear Redis cache: {e}")
+        
+    return {"status": "success", "message": "Interaction recorded and real-time updates applied.", "interaction": interaction.dict()}
 
 @app.get("/health")
 def health_check():
