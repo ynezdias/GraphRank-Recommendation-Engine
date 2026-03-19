@@ -1,8 +1,15 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 import redis
 import json
+import logging
+import time
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("graph_api")
 
 app = FastAPI(
     title="GraphRank API",
@@ -18,25 +25,50 @@ POSTGRES_DSN = f"dbname=graphrank user=admin password=admin host={DB_HOST} port=
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
-# Dependency to get DB connection per request
-def get_db():
-    conn = None
+# PostgreSQL Connection Pool
+db_pool = None
+
+@app.on_event("startup")
+def startup():
+    global db_pool
     try:
-        conn = psycopg2.connect(POSTGRES_DSN)
-        yield conn
+        db_pool = psycopg2.pool.SimpleConnectionPool(1, 20, POSTGRES_DSN)
+        if db_pool:
+            logger.info("PostgreSQL connection pool initialized.")
     except Exception as e:
-        print(f"Database connection error: {e}")
-        raise HTTPException(status_code=500, detail="Database connection failed")
+        logger.error(f"Failed to initialize PostgreSQL connection pool: {e}")
+
+@app.on_event("shutdown")
+def shutdown():
+    if db_pool:
+        db_pool.closeall()
+        logger.info("PostgreSQL connection pool closed.")
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000
+    
+    logger.info(f"{request.method} {request.url.path} completed in {process_time:.2f}ms with status code {response.status_code}")
+    return response
+
+# Dependency to get DB connection per request from pool
+def get_db():
+    if db_pool is None:
+        raise HTTPException(status_code=500, detail="Database pool not initialized")
+    conn = db_pool.getconn()
+    try:
+        yield conn
     finally:
-        if conn:
-            conn.close()
+        db_pool.putconn(conn)
 
 # Dependency to get Redis client
 def get_redis():
     try:
         return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     except Exception as e:
-        print(f"Redis connection error: {e}")
+        logger.error(f"Redis connection error: {e}")
         raise HTTPException(status_code=500, detail="Redis connection failed")
 
 @app.get("/health")
@@ -81,7 +113,7 @@ def get_recommendations(user_id: int, db = Depends(get_db), cache = Depends(get_
                 "recommendations": json.loads(cached_recs)
             }
     except Exception as e:
-        print(f"Warning: Redis cache lookup failed: {e}")
+        logger.warning(f"Redis cache lookup failed: {e}")
         # Continue to DB query if cache fails
     
     # 2. Cache Miss: Fetch from PostgreSQL
@@ -108,7 +140,7 @@ def get_recommendations(user_id: int, db = Depends(get_db), cache = Depends(get_
                 cache_list = [{"recommended_user_id": r["recommended_user_id"], "score": r["score"]} for r in recs]
                 cache.setex(cache_key, 3600, json.dumps(cache_list))
             except Exception as e:
-                 print(f"Warning: Failed to write to Redis cache: {e}")
+                 logger.warning(f"Failed to write to Redis cache: {e}")
                  
             return {
                 "user_id": user_id, 
