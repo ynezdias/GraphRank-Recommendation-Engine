@@ -13,6 +13,7 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+# CREATEEE GRAPH RANK SCHEDULER LOGGER
 logger = logging.getLogger("GraphRank_Scheduler")
 
 def run_step(command, step_name):
