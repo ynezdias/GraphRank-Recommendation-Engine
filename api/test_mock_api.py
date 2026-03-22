@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import sqlite3
 import json
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -77,6 +78,39 @@ def get_recommendations(user_id: int):
         
     return {"user_id": user_id, "source": "postgres", "recommendations": recs}
 
+class Interaction(BaseModel):
+    user_a: int
+    user_b: int
+
+@app.post("/interactions")
+def add_interaction(interaction: Interaction):
+    # Invalidate Mock Redis Cache
+    cache_key_a = f"recs:{interaction.user_a}"
+    cache_key_b = f"recs:{interaction.user_b}"
+    if cache_key_a in mock_redis_cache:
+        del mock_redis_cache[cache_key_a]
+    if cache_key_b in mock_redis_cache:
+        del mock_redis_cache[cache_key_b]
+        
+    conn = get_db()
+    cur = conn.cursor()
+    # 1. Update PageRank globally
+    cur.execute("UPDATE users SET pagerank_score = pagerank_score + 0.1 WHERE user_id = ?", (interaction.user_b,))
+    
+    # 2. Triadic Closure
+    cur.execute("SELECT recommended_user_id, score FROM recommendations WHERE user_id = ? ORDER BY score DESC LIMIT 5", (interaction.user_b,))
+    b_recs = [dict(row) for row in cur.fetchall()]
+    
+    for rec in b_recs:
+        new_score = rec['score'] * 0.5
+        if rec['recommended_user_id'] != interaction.user_a:
+            cur.execute("INSERT INTO recommendations (user_id, recommended_user_id, score) VALUES (?, ?, ?)", 
+                        (interaction.user_a, rec['recommended_user_id'], new_score))
+            
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
 # --- Test Script ---
 def test_api():
     client = TestClient(app)
@@ -96,6 +130,19 @@ def test_api():
         response2 = client.get("/recommendations/1")
         print("Source:", response2.json().get("source"))
         print("Response:", json.dumps(response2.json(), indent=2))
+        
+        print("\n--- SIMULATING REAL-TIME INTERACTION ---")
+        print("User 3 connects to User 1.")
+        client.post("/interactions", json={"user_a": 3, "user_b": 1})
+        
+        print("\nTesting /top-influencers (Verifying PageRank went up)...")
+        response_pr = client.get("/top-influencers")
+        print("Response:", json.dumps(response_pr.json(), indent=2))
+        
+        print("\nTesting /recommendations/3 (Checking for new dynamic Triadic Closure recs)...")
+        response_recs = client.get("/recommendations/3")
+        print("Source:", response_recs.json().get("source"))
+        print("Response:", json.dumps(response_recs.json(), indent=2))
 
 if __name__ == "__main__":
     test_api()
