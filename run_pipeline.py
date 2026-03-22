@@ -29,17 +29,20 @@ def main():
     # 3. Compute Influence & Recommendations (Spark)
     if not run_step("python spark_jobs/graph_engine.py", "Spark Graph Engine (PageRank & Recs)"): return
 
-    # 4. Start Database & Cache Containers
+    # 4. Offline Evaluation & Validation (Spark)
+    if not run_step("python spark_jobs/evaluate_model.py", "Recommendation Evaluation (Precision & Recall)"): return
+
+    # 5. Start Database & Cache Containers
     if not run_step("docker-compose up -d postgres redis", "Start Infrastructure Containers"): return
     
     print("\n⏳ Waiting 10 seconds for databases to initialize...")
     time.sleep(10)
 
-    # 5. Load Data into Postgres & Redis
+    # 6. Load Data into Postgres & Redis
     # We run this on the host since the Python env is here, pointing to localhost mapped ports
     if not run_step("python load/load_data.py", "Database Ingestion & Cache Priming"): return
 
-    # 6. Build and Start API Container
+    # 7. Build and Start API Container
     if not run_step("docker-compose up -d --build api", "Deploy API Service"): return
     
     print("\n" + "="*50)
