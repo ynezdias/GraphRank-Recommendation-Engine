@@ -29,8 +29,7 @@ def main():
     # 3. Compute Influence & Recommendations (Spark)
     if not run_step("python spark_jobs/graph_engine.py", "Spark Graph Engine (PageRank & Recs)"): return
 
-    # 4. Offline Evaluation & Validation (Spark)
-    if not run_step("python spark_jobs/evaluate_model.py", "Recommendation Evaluation (Precision & Recall)"): return
+    # Note: Evaluation step moved to the end of pipeline.
 
     # 5. Start Database & Cache Containers
     if not run_step("docker-compose up -d postgres redis", "Start Infrastructure Containers"): return
@@ -42,8 +41,20 @@ def main():
     # We run this on the host since the Python env is here, pointing to localhost mapped ports
     if not run_step("python load/load_data.py", "Database Ingestion & Cache Priming"): return
 
-    # 7. Build and Start API Container
+    # 7. Start the Streaming Pipeline Daemon (run in background)
+    print("\n" + "="*50)
+    print("🚀 STARTING STEP: Spark Streaming Pipeline (Background)")
+    print("="*50)
+    import subprocess
+    subprocess.Popen("python spark_jobs/stream_processor.py", shell=True)
+    print("✅ STEP COMPLETED: Spark Streaming Pipeline (Background)")
+
+    # 8. Build and Start API Container
     if not run_step("docker-compose up -d --build api", "Deploy API Service"): return
+    
+    # 9. Offline Evaluation & Validation (Spark)
+    # We can run evaluation at the end once the data is fully populated and model is ready.
+    if not run_step("python spark_jobs/evaluate_model.py", "Recommendation Evaluation (Precision & Recall)"): return
     
     print("\n" + "="*50)
     print("🎉 GraphRank Pipeline Execution Complete! 🎉")

@@ -29,7 +29,7 @@ def evaluate_predictions(predictions, ground_truth, k=10):
         .agg(F.collect_list("recommended_user_id").alias("predicted_connections"))
         
     # 4. Join and compute metrics per user
-    joined = actuals.join(preds, "user_id", "inner")
+    joined = actuals.join(preds, "user_id", "left_outer")
     
     # UDF to compute intersection size, precision, and recall
     def compute_metrics(actual_list, pred_list):
