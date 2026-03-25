@@ -32,17 +32,30 @@ def main():
     connection_metrics = connection_metrics.withColumn("total_connections", F.col("out_degree") + F.col("in_degree"))
 
     logger.info("Computing post metrics...")
-    # Compute total posts per user
-    post_metrics = df_posts.groupBy("user_id").count().withColumnRenamed("count", "post_count")
+    # Compute total posts and recency per user
+    post_metrics = df_posts.groupBy("user_id").agg(
+        F.count("*").alias("post_count"),
+        F.max("created_at").alias("latest_post_date")
+    )
+    
+    # Calculate a recency_score (inversely proportional to days since latest post)
+    post_metrics = post_metrics.withColumn(
+        "days_since_post",
+        F.datediff(F.current_timestamp(), F.to_timestamp(F.col("latest_post_date")))
+    ).withColumn(
+        "recency_score",
+        F.when(F.col("days_since_post").isNotNull() & (F.col("days_since_post") >= 0), 1.0 / (F.col("days_since_post") + 1.0))
+         .otherwise(0.0)
+    ).drop("latest_post_date", "days_since_post")
 
     logger.info("Joining all metrics with user metadata...")
     # Final Join
     user_metrics = df_users.join(connection_metrics, "user_id", "left") \
                            .join(post_metrics, "user_id", "left") \
-                           .fillna(0)
+                           .fillna({"total_connections": 0, "post_count": 0, "recency_score": 0.0})
 
     # Reorder columns for clarity
-    user_metrics = user_metrics.select("user_id", "name", "username", "total_connections", "post_count")
+    user_metrics = user_metrics.select("user_id", "name", "username", "total_connections", "post_count", "recency_score")
 
     logger.info("Writing processed results...")
     # Create processed directory if it doesn't exist (though Spark handles this)
