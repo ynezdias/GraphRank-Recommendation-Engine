@@ -5,8 +5,10 @@ import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import redis
-from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, IntegerType
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from graph_engine import load_ranking_weights
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -29,6 +31,10 @@ def process_microbatch(df, epoch_id):
     if not interactions:
         return
         
+    control_weights, treatment_weights = load_ranking_weights()
+    if not interactions:
+        return
+        
     logger.info(f"Processing microbatch {epoch_id} with {len(interactions)} new interactions.")
     
     cache = get_redis_client()
@@ -48,6 +54,9 @@ def process_microbatch(df, epoch_id):
                 """, (user_b,))
                 
                 # 2. Triadic Closure
+                variant = "control" if user_a % 2 == 0 else "treatment"
+                variant_weight = control_weights.get("w_mutual", 0.5) if variant == "control" else treatment_weights.get("w_mutual", 0.5)
+
                 cur.execute("""
                     SELECT recommended_user_id, score
                     FROM recommendations
@@ -65,7 +74,7 @@ def process_microbatch(df, epoch_id):
                         DO UPDATE SET score = recommendations.score + EXCLUDED.score
                     """
                     for rec in b_recs:
-                        new_score = rec['score'] * 0.5
+                        new_score = rec['score'] * variant_weight
                         if rec['recommended_user_id'] != user_a:
                             cur.execute(insert_query, (user_a, rec['recommended_user_id'], new_score))
                 

@@ -141,9 +141,13 @@ def get_recommendations(user_id: int, db = Depends(get_db), cache = Depends(get_
     # 1. Try to fetch from Redis Cache first (Lightning fast!)
     try:
         cached_recs = cache.get(cache_key)
+        
+        variant = "control" if user_id % 2 == 0 else "treatment"
+        
         if cached_recs:
             return {
                 "user_id": user_id, 
+                "experiment_variant": variant,
                 "source": "redis_cache", 
                 "recommendations": json.loads(cached_recs)
             }
@@ -167,7 +171,7 @@ def get_recommendations(user_id: int, db = Depends(get_db), cache = Depends(get_
             
             if not recs:
                 # If the user has no recommendations, return empty list
-                return {"user_id": user_id, "source": "postgres", "recommendations": []}
+                return {"user_id": user_id, "experiment_variant": variant, "source": "postgres", "recommendations": []}
                 
             # 3. Cache the result for next time (e.g., expire in 1 hour)
             try:
@@ -179,6 +183,7 @@ def get_recommendations(user_id: int, db = Depends(get_db), cache = Depends(get_
                  
             return {
                 "user_id": user_id, 
+                "experiment_variant": variant,
                 "source": "postgres", 
                 "recommendations": recs
             }

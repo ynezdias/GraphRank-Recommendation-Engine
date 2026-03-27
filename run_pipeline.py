@@ -26,7 +26,10 @@ def main():
     # 2. Process Graph Structure (Spark)
     if not run_step("python spark_jobs/process_graph.py", "Spark Graph Processing (Metrics)"): return
 
-    # 3. Compute Influence & Recommendations (Spark)
+    # 3. Optimize Ranking Weights (Spark)
+    if not run_step("python spark_jobs/optimize_ranking.py", "Ranking Optimization (Grid Search)"): return
+
+    # 4. Compute Influence & Recommendations (Spark)
     if not run_step("python spark_jobs/graph_engine.py", "Spark Graph Engine (PageRank & Recs)"): return
 
     # Note: Evaluation step moved to the end of pipeline.

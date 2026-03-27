@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 import os
+import json
 import logging
 
 # Configure logging
@@ -71,12 +72,50 @@ def calculate_pagerank(spark, connections, max_iter=10, damping_factor=0.85):
     return ranks.withColumnRenamed("id", "user_id").withColumnRenamed("rank", "pagerank")
 
 
-def generate_recommendations(spark, connections, pagerank_scores, user_metrics, limit=10):
+def load_ranking_weights():
+    control_weights = {
+        "w_mutual": 0.5,
+        "w_influence": 0.3,
+        "w_activity": 0.1,
+        "w_recency": 0.1
+    }
+    treatment_weights = {
+        "w_mutual": 0.5,
+        "w_influence": 0.3,
+        "w_activity": 0.1,
+        "w_recency": 0.1
+    }
+    try:
+        with open("config/ranking_weights.json", "r") as f:
+            weights = json.load(f)
+            control_weights.update(weights)
+    except Exception:
+        pass
+        
+    try:
+        with open("config/experiment_weights.json", "r") as f:
+            e_weights = json.load(f)
+            treatment_weights.update(e_weights)
+    except Exception:
+        pass
+        
+    return control_weights, treatment_weights
+
+def generate_recommendations(spark, connections, pagerank_scores, user_metrics, weights=None, limit=10):
     """
     Recommends users based on mutual connections (triadic closure)
-    and weights them by PageRank influence.
+    and weights them by PageRank influence, activity, and recency.
+    Assigns users to A/B testing variants (Control/Treatment).
     """
-    logger.info("Generating recommendations based on mutual connections...")
+    if weights is None:
+        control_weights, treatment_weights = load_ranking_weights()
+    elif isinstance(weights, dict):
+        control_weights = weights
+        treatment_weights = weights # If explicitly provided, use the same for both variants
+    else:
+        control_weights, treatment_weights = weights
+        
+    logger.info(f"Generating recommendations with Control: {control_weights} | Treatment: {treatment_weights}")
     
     # connections is currently user_a -> user_b
     # Let's ensure we consider links mostly bidirectional or at least find mutuals
@@ -110,16 +149,35 @@ def generate_recommendations(spark, connections, pagerank_scores, user_metrics, 
         
     # Step 4: Add PageRank influence to rank the recommendations
     # We want to recommend influential people (dst's PageRank) if mutuals are tied
+    
+    # Calculate deterministic experiment variant for each user
+    experiment_variant_expr = F.when(F.col("src") % 2 == 0, "control").otherwise("treatment")
+    
     ranked_recs = mutual_counts.join(pagerank_scores, mutual_counts.dst == pagerank_scores.user_id) \
         .join(user_metrics, mutual_counts.dst == user_metrics.user_id, "left") \
-        .fillna({"post_count": 0, "total_connections": 0}) \
-        .withColumn(
-            "recommendation_score", 
-            (F.col("mutual_friends") * 0.5) + 
-            (F.col("pagerank") * 100 * 0.3) + 
-            (F.col("total_connections") * 0.1) + 
-            (F.col("post_count") * 0.1)
-        )
+        .fillna({"post_count": 0, "total_connections": 0, "recency_score": 0.0}) \
+        .withColumn("experiment_variant", experiment_variant_expr)
+        
+    # Calculate separate scores for control and treatment and pick the right one
+    control_score_expr = (
+        (F.col("mutual_friends") * control_weights.get("w_mutual", 0.5)) + 
+        (F.col("pagerank") * 100 * control_weights.get("w_influence", 0.3)) + 
+        ((F.col("total_connections") + F.col("post_count")) * control_weights.get("w_activity", 0.1)) + 
+        (F.col("recency_score") * control_weights.get("w_recency", 0.1))
+    )
+    
+    treatment_score_expr = (
+        (F.col("mutual_friends") * treatment_weights.get("w_mutual", 0.5)) + 
+        (F.col("pagerank") * 100 * treatment_weights.get("w_influence", 0.3)) + 
+        ((F.col("total_connections") + F.col("post_count")) * treatment_weights.get("w_activity", 0.1)) + 
+        (F.col("recency_score") * treatment_weights.get("w_recency", 0.1))
+    )
+
+    ranked_recs = ranked_recs.withColumn(
+        "recommendation_score", 
+        F.when(F.col("experiment_variant") == "control", control_score_expr)
+         .otherwise(treatment_score_expr)
+    )
         
     # Step 5: Format output
     final_recs = ranked_recs.select(
@@ -127,6 +185,7 @@ def generate_recommendations(spark, connections, pagerank_scores, user_metrics, 
         F.col("dst").alias("recommended_user_id"),
         "mutual_friends",
         "pagerank",
+        "experiment_variant",
         "recommendation_score"
     )
     

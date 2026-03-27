@@ -96,6 +96,17 @@ def main():
     logger.info(f"  Precision@{metrics['k']}: {metrics['precision_at_k']:.4f}")
     logger.info(f"  Recall: {metrics['recall']:.4f}")
     
+    # 1. Read weights to log them
+    import datetime
+    try:
+        with open("config/ranking_weights.json", "r") as f:
+            weights = json.load(f)
+    except Exception:
+        weights = {"w_mutual": 0.5, "w_influence": 0.3, "w_activity": 0.1, "w_recency": 0.1}
+        
+    metrics["timestamp"] = datetime.datetime.now().isoformat()
+    metrics["weights"] = weights
+
     # Save to JSON
     output_dir = "processed"
     os.makedirs(output_dir, exist_ok=True)
@@ -103,7 +114,11 @@ def main():
     with open(output_file, "w") as f:
         json.dump(metrics, f, indent=4)
         
-    logger.info(f"Evaluation complete. Metrics saved to {output_file}")
+    history_file = os.path.join(output_dir, "evaluation_history.jsonl")
+    with open(history_file, "a") as f:
+        f.write(json.dumps(metrics) + "\n")
+        
+    logger.info(f"Evaluation complete. Metrics saved to {output_file} and appended to {history_file}")
     spark.stop()
 
 if __name__ == "__main__":
