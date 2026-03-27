@@ -4,7 +4,7 @@ import logging
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
-from graph_engine import calculate_pagerank, generate_recommendations
+from graph_engine import calculate_pagerank, generate_recommendations, load_ranking_weights
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -25,7 +25,7 @@ def evaluate_predictions(predictions, ground_truth, k=10):
         .agg(F.collect_set(F.col("user_b")).alias("actual_connections"))
         
     # 3. Extract predicted edges for each user
-    preds = top_k.groupBy("user_id") \
+    preds = top_k.groupBy("user_id", "experiment_variant") \
         .agg(F.collect_list("recommended_user_id").alias("predicted_connections"))
         
     # 4. Join and compute metrics per user
@@ -47,19 +47,24 @@ def evaluate_predictions(predictions, ground_truth, k=10):
     metrics_udf = F.udf(compute_metrics, metrics_schema)
     
     eval_df = joined.withColumn("metrics", metrics_udf(F.col("actual_connections"), F.col("predicted_connections"))) \
-        .select("user_id", "metrics.precision", "metrics.recall")
+        .select("user_id", "experiment_variant", "metrics.precision", "metrics.recall")
         
-    # 5. Average metrics over all users
-    final_metrics = eval_df.agg(
+    # 5. Average metrics over all users per variant
+    final_metrics = eval_df.groupBy("experiment_variant").agg(
         F.mean("precision").alias("mean_precision_at_k"),
         F.mean("recall").alias("mean_recall")
-    ).collect()[0]
+    ).collect()
     
-    return {
-        "precision_at_k": final_metrics["mean_precision_at_k"] or 0.0,
-        "recall": final_metrics["mean_recall"] or 0.0,
-        "k": k
-    }
+    results = {"k": k, "variants": {}}
+    for row in final_metrics:
+        variant = row["experiment_variant"]
+        if variant:
+            results["variants"][variant] = {
+                "precision_at_k": row["mean_precision_at_k"] or 0.0,
+                "recall": row["mean_recall"] or 0.0
+            }
+            
+    return results
 
 def main():
     spark = SparkSession.builder \
@@ -92,20 +97,19 @@ def main():
     logger.info("Evaluating predictions against unseen test edges...")
     metrics = evaluate_predictions(recommendations, test_edges, k=10)
     
-    logger.info(f"Evaluation Results:")
-    logger.info(f"  Precision@{metrics['k']}: {metrics['precision_at_k']:.4f}")
-    logger.info(f"  Recall: {metrics['recall']:.4f}")
+    logger.info(f"Evaluation Results for Top-{metrics['k']}:")
+    for variant, var_metrics in metrics.get("variants", {}).items():
+        logger.info(f"  Variant [{variant}] -> Precision: {var_metrics['precision_at_k']:.4f} | Recall: {var_metrics['recall']:.4f}")
     
     # 1. Read weights to log them
     import datetime
-    try:
-        with open("config/ranking_weights.json", "r") as f:
-            weights = json.load(f)
-    except Exception:
-        weights = {"w_mutual": 0.5, "w_influence": 0.3, "w_activity": 0.1, "w_recency": 0.1}
+    control_weights, treatment_weights = load_ranking_weights()
         
     metrics["timestamp"] = datetime.datetime.now().isoformat()
-    metrics["weights"] = weights
+    metrics["weights"] = {
+        "control": control_weights,
+        "treatment": treatment_weights
+    }
 
     # Save to JSON
     output_dir = "processed"
