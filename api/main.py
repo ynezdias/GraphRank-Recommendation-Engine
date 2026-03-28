@@ -106,6 +106,33 @@ def add_interaction(interaction: Interaction):
         
     return {"status": "success", "message": "Interaction accepted into the streaming pipeline.", "interaction": interaction.dict()}
 
+class Engagement(BaseModel):
+    user_id: int
+    recommended_user_id: int
+    experiment_variant: str
+    interaction_type: str
+
+@app.post("/engagement")
+def log_engagement(engagement: Engagement, db = Depends(get_db)):
+    """
+    Logs an engagement (e.g., impression, click) on a recommendation for A/B testing.
+    """
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                INSERT INTO recommendation_engagements 
+                (user_id, recommended_user_id, experiment_variant, interaction_type) 
+                VALUES (%s, %s, %s, %s)
+            """, (engagement.user_id, engagement.recommended_user_id, 
+                  engagement.experiment_variant, engagement.interaction_type))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to log engagement: {e}")
+        raise HTTPException(status_code=500, detail="Failed to log engagement.")
+        
+    return {"status": "success"}
+
 @app.get("/health")
 def health_check():
     """Simple health check endpoint."""

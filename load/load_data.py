@@ -40,6 +40,18 @@ def create_tables(conn):
                 PRIMARY KEY (user_id, recommended_user_id)
             );
         """)
+        
+        # Create recommendation engagements table for A/B testing
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS recommendation_engagements (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                recommended_user_id INTEGER,
+                experiment_variant VARCHAR(50),
+                interaction_type VARCHAR(50),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
     conn.commit()
 
 def load_data_to_postgres(conn):
