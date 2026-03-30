@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphRank Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h2>GraphRank.</h2>
+            </div>
+            <nav>
+                <ul>
+                    <li class="active"><a href="#" id="nav-dashboard">Dashboard</a></li>
+                    <li><a href="#" id="nav-discover">Discover</a></li>
+                </ul>
+            </nav>
+            <div class="system-status">
+                <span class="status-indicator online"></span>
+                <span id="api-status">API Online</span>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header>
+                <h1>System Overview</h1>
+                <div class="user-selector">
+                    <label for="user-id-input">Mock User ID:</label>
+                    <input type="number" id="user-id-input" value="1" min="1" max="1000">
+                    <button id="refresh-btn" class="btn-primary">Refresh Data</button>
+                </div>
+            </header>
+
+            <div class="top-cards">
+                <div class="card metric-card">
+                    <h3>Total Processed Nodes</h3>
+                    <p class="metric-value">5,000+</p>
+                    <span class="trend positive">↑ Live</span>
+                </div>
+                <div class="card metric-card">
+                    <h3>Pipeline Status</h3>
+                    <p class="metric-value">Active</p>
+                    <span class="trend">Streaming Processing</span>
+                </div>
+                <div class="card metric-card">
+                    <h3>Recommendation Latency</h3>
+                    <p class="metric-value" id="latency-val">~12ms</p>
+                    <span class="trend positive">Redis Cache</span>
+                </div>
+            </div>
+
+            <div class="content-grid">
+                <!-- Top Influencers Section -->
+                <section class="card wide-card" id="influencers-section">
+                    <div class="card-header">
+                        <h2>Top Influencers (PageRank)</h2>
+                    </div>
+                    <div class="table-container">
+                        <table id="influencers-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>User</th>
+                                    <th>Influence Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Data populated by JS -->
+                                <tr><td colspan="3" class="loading">Loading influencers...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Personalized Recommendations -->
+                <section class="card tall-card" id="recommendations-section">
+                    <div class="card-header">
+                        <h2>People You May Know</h2>
+                        <span class="badge" id="experiment-badge">A/B Testing</span>
+                    </div>
+                    <div class="recommendations-list" id="recommendations-list">
+                        <!-- Data populated by JS -->
+                        <div class="loading">Loading recommendations...</div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install Java for PySpark and procps for process management
+RUN apt-get update && apt-get install -y default-jre procps && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt schedule
+
+COPY . .
+
+ENV PYSPARK_PYTHON=python3
+ENV DB_HOST=postgres
+ENV REDIS_HOST=redis
