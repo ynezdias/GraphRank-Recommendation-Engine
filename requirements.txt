@@ -11,3 +11,4 @@ python-dotenv==1.0.1
 pyspark==3.5.1
 faker==24.3.0
 tqdm==4.66.2
+locust==2.24.0

@@ -41,6 +41,10 @@ def create_tables(conn):
             );
         """)
         
+        # Performance Indexes for API Lookups
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_users_pagerank ON users(pagerank_score DESC);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_recs_score ON recommendations(user_id, score DESC);")
+        
         # Create recommendation engagements table for A/B testing
         cur.execute("""
             CREATE TABLE IF NOT EXISTS recommendation_engagements (
