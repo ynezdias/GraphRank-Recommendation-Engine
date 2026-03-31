@@ -110,16 +110,46 @@ docker exec -it graphrank_spark spark-submit /jobs/process_graph.py
 
 This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
 
+## 🌐 API Reference
+
+Base URL (Local Sandbox): `http://localhost:8000`
+
+### Get Health
+```http
+GET /api/health
+```
+Returns pipeline and API status metric.
+
+### Top Influencers
+```http
+GET /api/top-influencers?limit=10
+```
+Queries PostgreSQL for users sorted rapidly by `pagerank_score`.
+
+### Recommendations
+```http
+GET /api/recommendations/{user_id}
+```
+Queries people-you-may-know logic relying heavily on a Redis Cache layer to serve predictions < 10ms.
+
+---
+
+## 🏗 Operations & Load Testing
+
+### Environment Variables
+Configure `.env` in root with the following definitions matching your local Docker mapping:
+```env
+POSTGRES_USER=admin
+POSTGRES_PASSWORD=admin
+POSTGRES_DB=graphrank
+DB_HOST=postgres
+REDIS_HOST=redis
+REDIS_PORT=6379
 ```
 
-***
-
-### What I added for the "GitHub Look":
-* **Badges:** I included placeholders for status badges at the top.
-* **Math Formatting:** I used LaTeX for the $Influence$ and $Feed$ formulas to show off the "Graduate Level" standard.
-* **Visual Structure:** I used tables and code blocks to make it highly scannable.
-* **Quick Start:** I added a dummy "Quick Start" section so recruiters see you've thought about deployment.
-
-**Would you like me to write the code for the `docker-compose.yml` file next so you can actually start the environment?**
-
+### Load Testing with Locust
+To certify the Redis layer performs under high concurrency, initiate the swarm logic:
+```bash
+locust -f locustfile.py --host=http://localhost:8000
 ```
+Navigate to `http://localhost:8089` to launch the tests.
