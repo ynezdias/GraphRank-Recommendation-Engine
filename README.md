@@ -8,6 +8,8 @@
 GraphRank is a high-performance distributed systems project designed to simulate the "social brain" of professional networking platforms. It processes millions of data points to identify influencers, detect communities, and rank content feeds in real-time.
 
 ---
+<img width="1536" height="1024" alt="Graph Rank Recommendation Engine" src="https://github.com/user-attachments/assets/a809ea65-07c5-477b-b40e-873fc81e4d11" />
+
 
 ## 📖 Overview
 In modern social networks, "who you know" and "what you see" are determined by massive graph computations. **GraphRank** tackles this challenge by combining big data engineering with graph theory. 
